@@ -1,0 +1,8 @@
+# OS & Temp Files
+.DS_Store
+Thumbs.db
+node_modules/
+*.log
+
+# Scratch / Temp
+brain/
