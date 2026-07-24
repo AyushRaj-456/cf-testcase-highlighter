@@ -26,9 +26,35 @@ When debugging competitive programming submissions on Codeforces, finding a spec
 
 ---
 
+## Installation
+
+### Method 1: Download ZIP (Recommended)
+
+1. Download the latest release ZIP from the repository:
+   - Click the green **Code** button at the top of this GitHub page and select **Download ZIP** (or download the ZIP from [Releases](https://github.com/AyushRaj-456/cf-testcase-highlighter/releases)).
+2. Extract the downloaded `cf-testcase-highlighter.zip` file to a folder on your computer.
+3. Open Google Chrome and type **`chrome://extensions/`** in the address bar.
+4. Enable **Developer mode** using the toggle switch in the top-right corner.
+5. Click **Load unpacked** in the top-left corner.
+6. Select the extracted folder containing `manifest.json`.
+
+---
+
+### Method 2: Clone Repository via Git
+
+```bash
+git clone https://github.com/AyushRaj-456/cf-testcase-highlighter.git
+```
+
+1. Open Google Chrome and go to `chrome://extensions/`.
+2. Enable **Developer mode** in the top-right corner.
+3. Click **Load unpacked** and select the cloned `cf-testcase-highlighter` folder.
+
+---
+
 ## How It Works
 
-1. Open any Codeforces submission test details view.
+1. Open any Codeforces submission page or test details view.
 2. The **CF Testcase Highlighter** control panel appears right above the **Input** block:
    - **First line is `t`** (Checked by default): Interprets line 1 as the number of test cases $t$.
    - **Lines per test** (Default: `3`): Defines how many physical lines belong to one test case.
@@ -74,28 +100,13 @@ When debugging competitive programming submissions on Codeforces, finding a spec
 
 ---
 
-## Installation
-
-### Chrome Web Store
-> **Chrome Web Store link**: *Coming soon*
-
-### Manual Installation (Developer Mode)
-
-1. Download or clone this repository to your computer.
-2. Open Google Chrome and go to `chrome://extensions/`.
-3. Enable **Developer mode** using the toggle switch in the top-right corner.
-4. Click **Load unpacked** in the top-left corner.
-5. Select the `CF Testcase Highlighter` project folder.
-
----
-
 ## Limitations
 
 - **Fixed Lines Per Test**: Version 1.0.0 assumes every test case in the input block occupies the exact same fixed number of physical lines. Variable-line testcase structures (e.g., $n$ lines where $n$ changes per testcase) are not supported in V1.
 
 ---
 
-## Privacy Policy Summary
+## Privacy Policy
 
 CF Testcase Highlighter operates **100% locally** in your browser:
 - Page content is read locally solely to perform visual line grouping.
@@ -107,4 +118,4 @@ CF Testcase Highlighter operates **100% locally** in your browser:
 
 ## License
 
-*Note for repository owner: Please choose an open source license (such as MIT, Apache 2.0, or GPL-3.0) when publishing this repository to GitHub.*
+Distributed under the MIT License. See [`LICENSE`](file:///c:/Users/Ayush/Desktop/Codes/CF%20Testcase%20Highlighter/LICENSE) for more information.
