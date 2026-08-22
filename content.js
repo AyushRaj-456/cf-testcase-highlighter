@@ -55,9 +55,63 @@
   }
 
   /**
-   * Pure parsing function for CF Testcase Highlighter Input
+   * Extract physical lines cleanly from a PRE element without destroying line structure.
+   * Handles plain text (\n), <div> line wrappers (.test-example-line), and <br> tags.
    */
-  function parseTestCases(rawInput, hasT, linesPerTest) {
+  function extractPhysicalLinesFromPre(pre) {
+    if (!pre) return [];
+
+    // Save pristine original HTML for 100% exact Reset
+    if (!pre.hasAttribute('data-cf-th-original-html')) {
+      pre.setAttribute('data-cf-th-original-html', pre.innerHTML);
+    }
+
+    // 1. Check if PRE contains <div> elements (e.g. .test-example-line in Codeforces Example blocks)
+    const divLines = pre.querySelectorAll(':scope > div, :scope > .test-example-line');
+    if (divLines.length > 0) {
+      const lines = [];
+      divLines.forEach(div => {
+        lines.push(div.textContent || '');
+      });
+      return lines;
+    }
+
+    // 2. Check if PRE contains <br> tags
+    const brTags = pre.querySelectorAll('br');
+    if (brTags.length > 0) {
+      const lines = [];
+      let currentLineText = '';
+      pre.childNodes.forEach(node => {
+        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR') {
+          lines.push(currentLineText);
+          currentLineText = '';
+        } else {
+          currentLineText += node.textContent || '';
+        }
+      });
+      if (currentLineText.length > 0 || lines.length === 0) {
+        lines.push(currentLineText);
+      }
+      return lines;
+    }
+
+    // 3. Fallback: Plain text in PRE. Use innerText or textContent normalized by \n
+    let rawText = '';
+    if (pre.innerText && pre.innerText.includes('\n')) {
+      rawText = pre.innerText;
+    } else {
+      rawText = pre.textContent || pre.innerText || '';
+    }
+
+    const cleanText = rawText.replace(/[\uFEFF\u200B-\u200D\u00A0]/g, '');
+    const normalized = cleanText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    return normalized.split('\n');
+  }
+
+  /**
+   * Pure parsing function for CF Testcase Highlighter Input (accepts array of lines or string)
+   */
+  function parseTestCasesFromLines(lines, hasT, linesPerTest) {
     const result = {
       t: null,
       tLine: null,
@@ -67,8 +121,8 @@
       warnings: []
     };
 
-    if (!rawInput || typeof rawInput !== 'string') {
-      result.errors.push("Input is empty or invalid.");
+    if (!Array.isArray(lines) || lines.length === 0) {
+      result.errors.push("Input contains no text lines.");
       return result;
     }
 
@@ -78,28 +132,23 @@
       return result;
     }
 
-    // Strip UTF-8 BOM (\uFEFF), non-breaking spaces (\u00A0), and zero-width characters (\u200B-\u200D)
-    const cleanInput = rawInput.replace(/[\uFEFF\u200B-\u200D\u00A0]/g, '');
+    const cleanLines = lines.map(line => line.replace(/[\uFEFF\u200B-\u200D\u00A0]/g, ''));
 
-    // Normalize newlines (CRLF / CR -> LF)
-    const normalized = cleanInput.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const lines = normalized.split('\n');
-
-    // Remove single trailing empty element caused by terminal newline
-    if (lines.length > 0 && lines[lines.length - 1] === '') {
-      lines.pop();
+    // Remove single trailing empty line caused by terminal newline
+    if (cleanLines.length > 0 && cleanLines[cleanLines.length - 1] === '') {
+      cleanLines.pop();
     }
 
-    if (lines.length === 0) {
+    if (cleanLines.length === 0) {
       result.errors.push("Input contains no text lines.");
       return result;
     }
 
-    let dataLines = lines;
+    let dataLines = cleanLines;
 
     if (hasT) {
-      result.tLine = lines[0];
-      const rawTStr = lines[0].trim();
+      result.tLine = cleanLines[0];
+      const rawTStr = cleanLines[0].trim();
       const cleanTStr = rawTStr.replace(/[^\d-]/g, '');
 
       if (!cleanTStr || !/^-?\d+$/.test(cleanTStr)) {
@@ -114,7 +163,7 @@
       }
 
       result.t = parsedT;
-      dataLines = lines.slice(1);
+      dataLines = cleanLines.slice(1);
     }
 
     const totalDataLines = dataLines.length;
@@ -145,10 +194,18 @@
     return result;
   }
 
+  function parseTestCases(rawInput, hasT, linesPerTest) {
+    if (Array.isArray(rawInput)) return parseTestCasesFromLines(rawInput, hasT, linesPerTest);
+    if (!rawInput || typeof rawInput !== 'string') return { tests: [], remainder: [], errors: ["Input is empty or invalid."], warnings: [] };
+    const cleanInput = rawInput.replace(/[\uFEFF\u200B-\u200D\u00A0]/g, '');
+    const normalized = cleanInput.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    return parseTestCasesFromLines(normalized.split('\n'), hasT, linesPerTest);
+  }
+
   /**
-   * Pure parsing function for Codeforces Output and Answer sections
+   * Pure parsing function for Codeforces Output and Answer sections (accepts array of lines or string)
    */
-  function parseAnswerTestCases(rawOutput, linesPerAnswer) {
+  function parseAnswerTestCasesFromLines(lines, linesPerAnswer) {
     const result = {
       tests: [],
       remainder: [],
@@ -156,8 +213,8 @@
       warnings: []
     };
 
-    if (!rawOutput || typeof rawOutput !== 'string') {
-      result.errors.push("Content is empty or invalid.");
+    if (!Array.isArray(lines) || lines.length === 0) {
+      result.errors.push("Content contains no text lines.");
       return result;
     }
 
@@ -167,30 +224,28 @@
       return result;
     }
 
-    const cleanOutput = rawOutput.replace(/[\uFEFF\u200B-\u200D\u00A0]/g, '');
-    const normalized = cleanOutput.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const lines = normalized.split('\n');
+    const cleanLines = lines.map(line => line.replace(/[\uFEFF\u200B-\u200D\u00A0]/g, ''));
 
-    if (lines.length > 0 && lines[lines.length - 1] === '') {
-      lines.pop();
+    if (cleanLines.length > 0 && cleanLines[cleanLines.length - 1] === '') {
+      cleanLines.pop();
     }
 
-    if (lines.length === 0) {
+    if (cleanLines.length === 0) {
       result.errors.push("Content contains no text lines.");
       return result;
     }
 
-    const totalLines = lines.length;
+    const totalLines = cleanLines.length;
 
     for (let i = 0; i < totalLines; i += parsedLPA) {
       if (i + parsedLPA <= totalLines) {
-        const testChunk = lines.slice(i, i + parsedLPA);
+        const testChunk = cleanLines.slice(i, i + parsedLPA);
         result.tests.push({
           number: result.tests.length + 1,
           lines: testChunk
         });
       } else {
-        result.remainder = lines.slice(i);
+        result.remainder = cleanLines.slice(i);
         result.warnings.push(
           `${result.remainder.length} line(s) remain and do not form a complete testcase (requires ${parsedLPA} line(s) per answer).`
         );
@@ -198,6 +253,14 @@
     }
 
     return result;
+  }
+
+  function parseAnswerTestCases(rawOutput, linesPerAnswer) {
+    if (Array.isArray(rawOutput)) return parseAnswerTestCasesFromLines(rawOutput, linesPerAnswer);
+    if (!rawOutput || typeof rawOutput !== 'string') return { tests: [], remainder: [], errors: ["Content is empty or invalid."], warnings: [] };
+    const cleanOutput = rawOutput.replace(/[\uFEFF\u200B-\u200D\u00A0]/g, '');
+    const normalized = cleanOutput.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    return parseAnswerTestCasesFromLines(normalized.split('\n'), linesPerAnswer);
   }
 
   /**
@@ -309,47 +372,9 @@
   }
 
   /**
-   * Extract raw text cleanly from target PRE element
-   */
-  function getRawPreText(activePre) {
-    if (!activePre) return '';
-
-    let saved = activePre.getAttribute('data-cf-th-original');
-    if (saved && saved.trim() !== '?' && saved.trim() !== '...' && saved.trim().length > 0) {
-      return saved;
-    }
-
-    if (activePre.querySelector('.cf-th-testcase')) {
-      let reconstructed = '';
-      const tLine = activePre.querySelector('.cf-th-t-line');
-      if (tLine) reconstructed += tLine.textContent;
-
-      const testSpans = activePre.querySelectorAll('.cf-th-testcase');
-      testSpans.forEach(span => {
-        reconstructed += span.textContent;
-      });
-
-      const remainder = activePre.querySelector('.cf-th-remainder');
-      if (remainder) reconstructed += remainder.textContent;
-
-      if (reconstructed.trim().length > 0) {
-        activePre.setAttribute('data-cf-th-original', reconstructed);
-        return reconstructed;
-      }
-    }
-
-    const currentText = activePre.textContent || activePre.innerText || '';
-    const trimmed = currentText.trim();
-    if (trimmed !== '' && trimmed !== '?' && trimmed !== '...') {
-      activePre.setAttribute('data-cf-th-original', currentText);
-      return currentText;
-    }
-
-    return currentText;
-  }
-
-  /**
-   * Render Parsed Elements cleanly into target PRE block
+   * Render Parsed Elements cleanly into target PRE block.
+   * Note: No trailing \n is appended to test.lines.join('\n') because testSpan has display: block,
+   * avoiding extra blank line breaks inside <pre> blocks.
    */
   function renderTestCasesInPre(pre, parseResult, failedTestNum) {
     pre.textContent = ''; // Clear current content
@@ -357,7 +382,7 @@
     if (parseResult.tLine !== undefined && parseResult.tLine !== null) {
       const tSpan = document.createElement('span');
       tSpan.className = 'cf-th-t-line';
-      tSpan.textContent = parseResult.tLine + '\n';
+      tSpan.textContent = parseResult.tLine; // No trailing \n
       pre.appendChild(tSpan);
     }
 
@@ -372,7 +397,7 @@
       testSpan.style.borderLeft = '4px solid transparent';
       testSpan.style.paddingLeft = '6px';
       testSpan.style.paddingRight = '60px';
-      testSpan.style.margin = '2px 0';
+      testSpan.style.margin = '0';
       testSpan.style.borderRadius = '3px';
       testSpan.style.transition = 'background-color 0.15s ease, border-left-color 0.15s ease';
       testSpan.style.cursor = 'pointer';
@@ -402,7 +427,8 @@
         }
       });
 
-      const linesText = document.createTextNode(test.lines.join('\n') + '\n');
+      // No trailing \n because testSpan is display: block
+      const linesText = document.createTextNode(test.lines.join('\n'));
       testSpan.appendChild(linesText);
 
       pre.appendChild(testSpan);
@@ -413,7 +439,7 @@
       remainderSpan.className = 'cf-th-remainder';
       remainderSpan.style.opacity = '0.7';
       remainderSpan.style.fontStyle = 'italic';
-      remainderSpan.textContent = parseResult.remainder.join('\n') + '\n';
+      remainderSpan.textContent = parseResult.remainder.join('\n'); // No trailing \n
       pre.appendChild(remainderSpan);
     }
   }
@@ -541,18 +567,14 @@
     if (answerPre) answerPre.setAttribute('data-cf-th-initialized', 'true');
 
     function performReset() {
-      if (inputPre) {
-        const orig = getRawPreText(inputPre);
-        if (orig) inputPre.textContent = orig;
-      }
-      if (outputPre) {
-        const orig = getRawPreText(outputPre);
-        if (orig) outputPre.textContent = orig;
-      }
-      if (answerPre) {
-        const orig = getRawPreText(answerPre);
-        if (orig) answerPre.textContent = orig;
-      }
+      [inputPre, outputPre, answerPre].forEach(pre => {
+        if (pre) {
+          const origHtml = pre.getAttribute('data-cf-th-original-html');
+          if (origHtml !== null) {
+            pre.innerHTML = origHtml;
+          }
+        }
+      });
       statusMsg.textContent = '';
       statusMsg.className = 'cf-th-status';
     }
@@ -574,12 +596,11 @@
 
       // Process Input
       if (inputPre) {
-        const origInput = getRawPreText(inputPre);
-        if (!origInput || origInput.trim() === '' || origInput.trim() === '?' || origInput.trim() === '...') {
+        const inputLines = extractPhysicalLinesFromPre(inputPre);
+        if (inputLines.length === 0) {
           warnings.push("Input content is empty or loading.");
         } else {
-          inputPre.textContent = origInput;
-          const parseResult = parseTestCases(origInput, hasT, parsedLPT);
+          const parseResult = parseTestCasesFromLines(inputLines, hasT, parsedLPT);
           if (parseResult.errors.length > 0) {
             errors.push(`Input Error: ${parseResult.errors.join(' ')}`);
           } else {
@@ -594,12 +615,11 @@
 
       // Process Output
       if (outputPre) {
-        const origOutput = getRawPreText(outputPre);
-        if (!origOutput || origOutput.trim() === '' || origOutput.trim() === '?' || origOutput.trim() === '...') {
+        const outputLines = extractPhysicalLinesFromPre(outputPre);
+        if (outputLines.length === 0) {
           warnings.push("Output content is empty or loading.");
         } else {
-          outputPre.textContent = origOutput;
-          const parseResult = parseAnswerTestCases(origOutput, parsedLPA);
+          const parseResult = parseAnswerTestCasesFromLines(outputLines, parsedLPA);
           if (parseResult.errors.length > 0) {
             errors.push(`Output Error: ${parseResult.errors.join(' ')}`);
           } else {
@@ -614,12 +634,11 @@
 
       // Process Answer
       if (answerPre) {
-        const origAnswer = getRawPreText(answerPre);
-        if (!origAnswer || origAnswer.trim() === '' || origAnswer.trim() === '?' || origAnswer.trim() === '...') {
+        const answerLines = extractPhysicalLinesFromPre(answerPre);
+        if (answerLines.length === 0) {
           warnings.push("Answer content is empty or loading.");
         } else {
-          answerPre.textContent = origAnswer;
-          const parseResult = parseAnswerTestCases(origAnswer, parsedLPA);
+          const parseResult = parseAnswerTestCasesFromLines(answerLines, parsedLPA);
           if (parseResult.errors.length > 0) {
             errors.push(`Answer Error: ${parseResult.errors.join(' ')}`);
           } else {
