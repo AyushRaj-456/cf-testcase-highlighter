@@ -12,7 +12,8 @@
   // Default Settings
   const DEFAULT_SETTINGS = {
     hasT: true,
-    linesPerTest: 3
+    linesPerTest: 3,
+    linesPerAnswer: 1
   };
 
   let userSettings = { ...DEFAULT_SETTINGS };
@@ -20,11 +21,15 @@
   // Load saved settings from chrome.storage if available
   try {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['cf_th_hasT', 'cf_th_linesPerTest'], (data) => {
+      chrome.storage.local.get(['cf_th_hasT', 'cf_th_linesPerTest', 'cf_th_linesPerAnswer'], (data) => {
         if (data.cf_th_hasT !== undefined) userSettings.hasT = Boolean(data.cf_th_hasT);
         if (data.cf_th_linesPerTest !== undefined) {
           const parsed = parseInt(data.cf_th_linesPerTest, 10);
           if (!isNaN(parsed) && parsed >= 1) userSettings.linesPerTest = parsed;
+        }
+        if (data.cf_th_linesPerAnswer !== undefined) {
+          const parsedAns = parseInt(data.cf_th_linesPerAnswer, 10);
+          if (!isNaN(parsedAns) && parsedAns >= 1) userSettings.linesPerAnswer = parsedAns;
         }
       });
     }
@@ -32,14 +37,16 @@
     // Fallback to defaults
   }
 
-  function saveSettings(hasT, linesPerTest) {
+  function saveSettings(hasT, linesPerTest, linesPerAnswer) {
     userSettings.hasT = hasT;
     userSettings.linesPerTest = linesPerTest;
+    userSettings.linesPerAnswer = linesPerAnswer;
     try {
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
         chrome.storage.local.set({
           cf_th_hasT: hasT,
-          cf_th_linesPerTest: linesPerTest
+          cf_th_linesPerTest: linesPerTest,
+          cf_th_linesPerAnswer: linesPerAnswer
         });
       }
     } catch (e) {
@@ -48,7 +55,7 @@
   }
 
   /**
-   * Pure parsing function for CF Testcase Highlighter
+   * Pure parsing function for CF Testcase Highlighter Input
    */
   function parseTestCases(rawInput, hasT, linesPerTest) {
     const result = {
@@ -139,6 +146,61 @@
   }
 
   /**
+   * Pure parsing function for Codeforces Output and Answer sections
+   */
+  function parseAnswerTestCases(rawOutput, linesPerAnswer) {
+    const result = {
+      tests: [],
+      remainder: [],
+      errors: [],
+      warnings: []
+    };
+
+    if (!rawOutput || typeof rawOutput !== 'string') {
+      result.errors.push("Content is empty or invalid.");
+      return result;
+    }
+
+    const parsedLPA = parseInt(linesPerAnswer, 10);
+    if (isNaN(parsedLPA) || parsedLPA < 1) {
+      result.errors.push("Lines per answer must be a positive integer (minimum 1).");
+      return result;
+    }
+
+    const cleanOutput = rawOutput.replace(/[\uFEFF\u200B-\u200D\u00A0]/g, '');
+    const normalized = cleanOutput.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
+
+    if (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+
+    if (lines.length === 0) {
+      result.errors.push("Content contains no text lines.");
+      return result;
+    }
+
+    const totalLines = lines.length;
+
+    for (let i = 0; i < totalLines; i += parsedLPA) {
+      if (i + parsedLPA <= totalLines) {
+        const testChunk = lines.slice(i, i + parsedLPA);
+        result.tests.push({
+          number: result.tests.length + 1,
+          lines: testChunk
+        });
+      } else {
+        result.remainder = lines.slice(i);
+        result.warnings.push(
+          `${result.remainder.length} line(s) remain and do not form a complete testcase (requires ${parsedLPA} line(s) per answer).`
+        );
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Determine section title ('input', 'output', 'answer', 'checker log') for a PRE element
    */
   function getPreSectionTitle(pre) {
@@ -155,7 +217,16 @@
       if (nameEl) return nameEl.textContent.trim().toLowerCase();
     }
 
-    // 2. Check previous siblings (e.g. <div>Input</div>, <b>Input</b>, <span class="name">Input</span>)
+    // 2. Check parent element class names (e.g. <div class="input"><pre>...</pre></div>)
+    const parent = pre.parentElement;
+    if (parent) {
+      if (parent.classList.contains('input') || parent.classList.contains('input-file')) return 'input';
+      if (parent.classList.contains('output') || parent.classList.contains('output-file')) return 'output';
+      if (parent.classList.contains('answer') || parent.classList.contains('answer-file')) return 'answer';
+      if (parent.classList.contains('checker')) return 'checker log';
+    }
+
+    // 3. Check previous siblings (e.g. <div>Input</div>, <b>Input</b>, <span class="name">Input</span>, <div class="title">Input</div>)
     let prev = pre.previousElementSibling;
     let lookbackCount = 0;
     while (prev && lookbackCount < 5) {
@@ -169,20 +240,22 @@
       lookbackCount++;
     }
 
-    // 3. Check parent container's headings / labels / titles
-    const parent = pre.parentElement;
+    // 4. Check parent container's headings / labels / titles (only if parent wraps single PRE)
     if (parent) {
-      const titleEl = parent.querySelector('.title, .name, .header, .caption, b, strong, h4, h5, div');
-      if (titleEl && titleEl !== pre) {
-        const text = titleEl.textContent.trim().toLowerCase();
-        if (text === 'input' || text.startsWith('input')) return 'input';
-        if (text === 'output' || text.startsWith('output')) return 'output';
-        if (text === 'answer' || text.startsWith('answer')) return 'answer';
-        if (text.includes('checker log')) return 'checker log';
+      const preCountInParent = parent.querySelectorAll('pre').length;
+      if (preCountInParent === 1) {
+        const titleEl = parent.querySelector('.title, .name, .header, .caption, b, strong, h4, h5, div');
+        if (titleEl && titleEl !== pre) {
+          const text = titleEl.textContent.trim().toLowerCase();
+          if (text === 'input' || text.startsWith('input')) return 'input';
+          if (text === 'output' || text.startsWith('output')) return 'output';
+          if (text === 'answer' || text.startsWith('answer')) return 'answer';
+          if (text.includes('checker log')) return 'checker log';
+        }
       }
     }
 
-    // 4. Check PRE's own class names
+    // 5. Check PRE's own class names
     if (pre.classList.contains('input')) return 'input';
     if (pre.classList.contains('output')) return 'output';
     if (pre.classList.contains('answer')) return 'answer';
@@ -191,33 +264,30 @@
     return '';
   }
 
-  /**
-   * Check if a PRE element belongs strictly to a Codeforces submission Input section
-   */
-  function isCodeforcesSubmissionInputPre(pre) {
+  function isCodeforcesInputPre(pre) {
     if (!pre || pre.tagName !== 'PRE') return false;
-
-    // Exclude source code viewers
-    if (pre.classList.contains('prettyprint') ||
-        pre.closest('.program-source') ||
-        pre.closest('.source-code')) {
-      return false;
-    }
-
-    // Exclude problem statement example tests
-    if (pre.closest('.sample-test') || pre.closest('.sample-tests')) {
-      return false;
-    }
-
-    const sectionTitle = getPreSectionTitle(pre);
-    if (sectionTitle !== 'input') return false;
-
-    // Ignore placeholder PRE blocks containing only '?' or '...'
+    if (pre.classList.contains('prettyprint') || pre.closest('.program-source') || pre.closest('.source-code')) return false;
+    if (getPreSectionTitle(pre) !== 'input') return false;
     const txt = (pre.textContent || pre.innerText || '').trim();
-    if (txt === '' || txt === '?' || txt === '...') {
-      return false;
-    }
+    if (txt === '' || txt === '?' || txt === '...') return false;
+    return true;
+  }
 
+  function isCodeforcesOutputPre(pre) {
+    if (!pre || pre.tagName !== 'PRE') return false;
+    if (pre.classList.contains('prettyprint') || pre.closest('.program-source') || pre.closest('.source-code')) return false;
+    if (getPreSectionTitle(pre) !== 'output') return false;
+    const txt = (pre.textContent || pre.innerText || '').trim();
+    if (txt === '' || txt === '?' || txt === '...') return false;
+    return true;
+  }
+
+  function isCodeforcesAnswerPre(pre) {
+    if (!pre || pre.tagName !== 'PRE') return false;
+    if (pre.classList.contains('prettyprint') || pre.closest('.program-source') || pre.closest('.source-code')) return false;
+    if (getPreSectionTitle(pre) !== 'answer') return false;
+    const txt = (pre.textContent || pre.innerText || '').trim();
+    if (txt === '' || txt === '?' || txt === '...') return false;
     return true;
   }
 
@@ -239,9 +309,9 @@
   }
 
   /**
-   * Extract raw input text cleanly from target PRE element
+   * Extract raw text cleanly from target PRE element
    */
-  function getRawInput(activePre) {
+  function getRawPreText(activePre) {
     if (!activePre) return '';
 
     let saved = activePre.getAttribute('data-cf-th-original');
@@ -249,7 +319,6 @@
       return saved;
     }
 
-    // If activePre already contains our rendered testcases, extract raw input text
     if (activePre.querySelector('.cf-th-testcase')) {
       let reconstructed = '';
       const tLine = activePre.querySelector('.cf-th-t-line');
@@ -280,240 +349,362 @@
   }
 
   /**
-   * Inject extension controls and attach handlers to a Codeforces Input PRE block
+   * Render Parsed Elements cleanly into target PRE block
    */
-  function setupInputHighlighter(initialPre) {
-    if (initialPre.hasAttribute('data-cf-th-initialized')) return;
-    initialPre.setAttribute('data-cf-th-initialized', 'true');
+  function renderTestCasesInPre(pre, parseResult, failedTestNum) {
+    pre.textContent = ''; // Clear current content
 
-    // Create extension UI container
-    const container = document.createElement('div');
-    container.className = 'cf-th-container';
-
-    // Build controls HTML safely
-    const controls = document.createElement('div');
-    controls.className = 'cf-th-controls';
-
-    // Title
-    const title = document.createElement('div');
-    title.className = 'cf-th-title';
-    title.textContent = 'CF Testcase Highlighter';
-    const badge = document.createElement('span');
-    badge.className = 'cf-th-title-badge';
-    badge.textContent = 'V1';
-    title.appendChild(badge);
-    controls.appendChild(title);
-
-    // Checkbox Field: First line is t
-    const checkboxField = document.createElement('label');
-    checkboxField.className = 'cf-th-field';
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'cf-th-checkbox';
-    checkbox.checked = userSettings.hasT;
-    const checkboxLabelText = document.createElement('span');
-    checkboxLabelText.className = 'cf-th-label-text';
-    checkboxLabelText.textContent = 'First line is t';
-    checkboxField.appendChild(checkbox);
-    checkboxField.appendChild(checkboxLabelText);
-    controls.appendChild(checkboxField);
-
-    // Number Field: Lines per test
-    const inputField = document.createElement('label');
-    inputField.className = 'cf-th-field';
-    const inputLabelText = document.createElement('span');
-    inputLabelText.className = 'cf-th-label-text';
-    inputLabelText.textContent = 'Lines per test';
-    const numInput = document.createElement('input');
-    numInput.type = 'number';
-    numInput.className = 'cf-th-input';
-    numInput.value = userSettings.linesPerTest;
-    numInput.min = '1';
-    inputField.appendChild(inputLabelText);
-    inputField.appendChild(numInput);
-    controls.appendChild(inputField);
-
-    // Buttons
-    const btnGroup = document.createElement('div');
-    btnGroup.className = 'cf-th-btn-group';
-
-    const highlightBtn = document.createElement('button');
-    highlightBtn.type = 'button';
-    highlightBtn.className = 'cf-th-btn cf-th-btn-primary';
-    highlightBtn.textContent = 'Highlight';
-
-    const resetBtn = document.createElement('button');
-    resetBtn.type = 'button';
-    resetBtn.className = 'cf-th-btn cf-th-btn-secondary';
-    resetBtn.textContent = 'Reset';
-
-    btnGroup.appendChild(highlightBtn);
-    btnGroup.appendChild(resetBtn);
-    controls.appendChild(btnGroup);
-
-    // Status / Message Bar
-    const statusMsg = document.createElement('div');
-    statusMsg.className = 'cf-th-status';
-
-    container.appendChild(controls);
-    container.appendChild(statusMsg);
-
-    // Insert container immediately before initialPre element
-    if (initialPre.parentNode) {
-      initialPre.parentNode.insertBefore(container, initialPre);
+    if (parseResult.tLine !== undefined && parseResult.tLine !== null) {
+      const tSpan = document.createElement('span');
+      tSpan.className = 'cf-th-t-line';
+      tSpan.textContent = parseResult.tLine + '\n';
+      pre.appendChild(tSpan);
     }
 
-    /**
-     * Clear and reset PRE block back to original state
-     */
+    parseResult.tests.forEach((test) => {
+      const testSpan = document.createElement('span');
+      testSpan.className = 'cf-th-testcase';
+      testSpan.setAttribute('data-test-number', test.number);
+      testSpan.setAttribute('data-test-label', `#${test.number}`);
+
+      testSpan.style.display = 'block';
+      testSpan.style.position = 'relative';
+      testSpan.style.borderLeft = '4px solid transparent';
+      testSpan.style.paddingLeft = '6px';
+      testSpan.style.paddingRight = '60px';
+      testSpan.style.margin = '2px 0';
+      testSpan.style.borderRadius = '3px';
+      testSpan.style.transition = 'background-color 0.15s ease, border-left-color 0.15s ease';
+      testSpan.style.cursor = 'pointer';
+
+      const isFailed = failedTestNum !== null && test.number === failedTestNum;
+      if (isFailed) {
+        testSpan.classList.add('cf-th-failed');
+        testSpan.style.backgroundColor = '#ffe3e3';
+        testSpan.style.borderLeft = '4px solid #dc3545';
+      }
+
+      testSpan.addEventListener('mouseenter', () => {
+        testSpan.style.backgroundColor = isFailed ? '#ffc9c9' : '#bbe1ff';
+        testSpan.style.borderLeft = isFailed ? '4px solid #dc3545' : '4px solid #0056b3';
+        testSpan.style.boxShadow = '0 1px 4px rgba(0, 86, 179, 0.25)';
+      });
+
+      testSpan.addEventListener('mouseleave', () => {
+        if (isFailed) {
+          testSpan.style.backgroundColor = '#ffe3e3';
+          testSpan.style.borderLeft = '4px solid #dc3545';
+          testSpan.style.boxShadow = 'none';
+        } else {
+          testSpan.style.backgroundColor = 'transparent';
+          testSpan.style.borderLeft = '4px solid transparent';
+          testSpan.style.boxShadow = 'none';
+        }
+      });
+
+      const linesText = document.createTextNode(test.lines.join('\n') + '\n');
+      testSpan.appendChild(linesText);
+
+      pre.appendChild(testSpan);
+    });
+
+    if (parseResult.remainder && parseResult.remainder.length > 0) {
+      const remainderSpan = document.createElement('span');
+      remainderSpan.className = 'cf-th-remainder';
+      remainderSpan.style.opacity = '0.7';
+      remainderSpan.style.fontStyle = 'italic';
+      remainderSpan.textContent = parseResult.remainder.join('\n') + '\n';
+      pre.appendChild(remainderSpan);
+    }
+  }
+
+  /**
+   * Helper to get container for grouping PRE blocks
+   */
+  function getTestDetailsContainer(pre) {
+    const parentFile = pre.closest('.file');
+    if (parentFile && parentFile.parentElement) {
+      return parentFile.parentElement;
+    }
+    return pre.closest('.sample-test, .popup, .test-details, .roundbox, table, body') || document.body;
+  }
+
+  /**
+   * Inject extension controls and attach handlers for a submission test case group
+   */
+  function setupTestcaseHighlighterGroup(groupContext, inputPre, outputPre, answerPre) {
+    let container = groupContext.querySelector(':scope > .cf-th-container, .cf-th-container');
+    let checkbox, numInput, numAnswerInput, highlightBtn, resetBtn, statusMsg;
+
+    if (!container) {
+      container = document.createElement('div');
+      container.className = 'cf-th-container';
+
+      const controls = document.createElement('div');
+      controls.className = 'cf-th-controls';
+
+      // Title
+      const title = document.createElement('div');
+      title.className = 'cf-th-title';
+      title.textContent = 'CF Testcase Highlighter';
+      const badge = document.createElement('span');
+      badge.className = 'cf-th-title-badge';
+      badge.textContent = 'V1';
+      title.appendChild(badge);
+      controls.appendChild(title);
+
+      // Checkbox Field: First line is t
+      const checkboxField = document.createElement('label');
+      checkboxField.className = 'cf-th-field';
+      checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'cf-th-checkbox';
+      checkbox.checked = userSettings.hasT;
+      const checkboxLabelText = document.createElement('span');
+      checkboxLabelText.className = 'cf-th-label-text';
+      checkboxLabelText.textContent = 'First line is t';
+      checkboxField.appendChild(checkbox);
+      checkboxField.appendChild(checkboxLabelText);
+      controls.appendChild(checkboxField);
+
+      // Number Field: Lines per test
+      const inputField = document.createElement('label');
+      inputField.className = 'cf-th-field';
+      const inputLabelText = document.createElement('span');
+      inputLabelText.className = 'cf-th-label-text';
+      inputLabelText.textContent = 'Lines per test';
+      numInput = document.createElement('input');
+      numInput.type = 'number';
+      numInput.className = 'cf-th-input';
+      numInput.value = userSettings.linesPerTest;
+      numInput.min = '1';
+      inputField.appendChild(inputLabelText);
+      inputField.appendChild(numInput);
+      controls.appendChild(inputField);
+
+      // Number Field: Lines per answer
+      const answerField = document.createElement('label');
+      answerField.className = 'cf-th-field';
+      const answerLabelText = document.createElement('span');
+      answerLabelText.className = 'cf-th-label-text';
+      answerLabelText.textContent = 'Lines per answer';
+      numAnswerInput = document.createElement('input');
+      numAnswerInput.type = 'number';
+      numAnswerInput.className = 'cf-th-input';
+      numAnswerInput.value = userSettings.linesPerAnswer;
+      numAnswerInput.min = '1';
+      answerField.appendChild(answerLabelText);
+      answerField.appendChild(numAnswerInput);
+      controls.appendChild(answerField);
+
+      // Buttons
+      const btnGroup = document.createElement('div');
+      btnGroup.className = 'cf-th-btn-group';
+
+      highlightBtn = document.createElement('button');
+      highlightBtn.type = 'button';
+      highlightBtn.className = 'cf-th-btn cf-th-btn-primary';
+      highlightBtn.textContent = 'Highlight';
+
+      resetBtn = document.createElement('button');
+      resetBtn.type = 'button';
+      resetBtn.className = 'cf-th-btn cf-th-btn-secondary';
+      resetBtn.textContent = 'Reset';
+
+      btnGroup.appendChild(highlightBtn);
+      btnGroup.appendChild(resetBtn);
+      controls.appendChild(btnGroup);
+
+      // Status / Message Bar
+      statusMsg = document.createElement('div');
+      statusMsg.className = 'cf-th-status';
+
+      container.appendChild(controls);
+      container.appendChild(statusMsg);
+
+      const firstPre = inputPre || outputPre || answerPre;
+      if (firstPre && firstPre.parentNode) {
+        firstPre.parentNode.insertBefore(container, firstPre);
+      }
+    } else {
+      checkbox = container.querySelector('.cf-th-checkbox');
+      const numInputs = container.querySelectorAll('.cf-th-input');
+      numInput = numInputs[0];
+      numAnswerInput = numInputs[1];
+      highlightBtn = container.querySelector('.cf-th-btn-primary');
+      resetBtn = container.querySelector('.cf-th-btn-secondary');
+      statusMsg = container.querySelector('.cf-th-status');
+    }
+
+    if (inputPre) inputPre.setAttribute('data-cf-th-initialized', 'true');
+    if (outputPre) outputPre.setAttribute('data-cf-th-initialized', 'true');
+    if (answerPre) answerPre.setAttribute('data-cf-th-initialized', 'true');
+
     function performReset() {
-      const orig = getRawInput(initialPre);
-      if (orig && initialPre) {
-        initialPre.textContent = orig;
+      if (inputPre) {
+        const orig = getRawPreText(inputPre);
+        if (orig) inputPre.textContent = orig;
+      }
+      if (outputPre) {
+        const orig = getRawPreText(outputPre);
+        if (orig) outputPre.textContent = orig;
+      }
+      if (answerPre) {
+        const orig = getRawPreText(answerPre);
+        if (orig) answerPre.textContent = orig;
       }
       statusMsg.textContent = '';
       statusMsg.className = 'cf-th-status';
     }
 
-    /**
-     * Parse and render highlighted test cases
-     */
     function performHighlight() {
-      const originalInputText = getRawInput(initialPre);
+      const hasT = checkbox ? checkbox.checked : userSettings.hasT;
+      const linesPerTestVal = numInput ? parseInt(numInput.value, 10) : userSettings.linesPerTest;
+      const linesPerAnsVal = numAnswerInput ? parseInt(numAnswerInput.value, 10) : userSettings.linesPerAnswer;
 
-      if (!originalInputText || originalInputText.trim() === '' || originalInputText.trim() === '?' || originalInputText.trim() === '...') {
-        statusMsg.textContent = "Input content is still loading or empty. Please click Highlight again once loaded.";
-        statusMsg.className = 'cf-th-status cf-th-visible cf-th-warning';
-        return;
-      }
+      const parsedLPT = isNaN(linesPerTestVal) ? 3 : linesPerTestVal;
+      const parsedLPA = isNaN(linesPerAnsVal) ? 1 : linesPerAnsVal;
 
-      // Reset to original text first before parsing
-      initialPre.textContent = originalInputText;
+      saveSettings(hasT, parsedLPT, parsedLPA);
 
-      const hasT = checkbox.checked;
-      const linesPerTest = parseInt(numInput.value, 10);
-
-      // Save user settings
-      saveSettings(hasT, isNaN(linesPerTest) ? 3 : linesPerTest);
-
-      // Run pure parser
-      const parseResult = parseTestCases(originalInputText, hasT, linesPerTest);
-
-      // Handle Errors
-      if (parseResult.errors.length > 0) {
-        statusMsg.textContent = parseResult.errors.join(' ');
-        statusMsg.className = 'cf-th-status cf-th-visible cf-th-error';
-        return;
-      }
-
-      // Handle Warnings & Success Feedback
-      if (parseResult.warnings.length > 0) {
-        statusMsg.textContent = `Highlighted ${parseResult.tests.length} test case(s). ${parseResult.warnings.join(' ')}`;
-        statusMsg.className = 'cf-th-status cf-th-visible cf-th-warning';
-      } else {
-        statusMsg.textContent = `Successfully highlighted ${parseResult.tests.length} test case(s)!`;
-        statusMsg.className = 'cf-th-status cf-th-visible cf-th-info';
-      }
-
-      // Render Parsed Elements safely into initialPre
-      initialPre.textContent = ''; // Clear current content
-
+      let errors = [];
+      let warnings = [];
+      let successes = [];
       const failedTestNum = detectFailedTestNumber(container);
 
-      // Render first line 't' if enabled
-      if (hasT && parseResult.tLine !== null) {
-        const tSpan = document.createElement('span');
-        tSpan.className = 'cf-th-t-line';
-        tSpan.textContent = parseResult.tLine + '\n';
-        initialPre.appendChild(tSpan);
+      // Process Input
+      if (inputPre) {
+        const origInput = getRawPreText(inputPre);
+        if (!origInput || origInput.trim() === '' || origInput.trim() === '?' || origInput.trim() === '...') {
+          warnings.push("Input content is empty or loading.");
+        } else {
+          inputPre.textContent = origInput;
+          const parseResult = parseTestCases(origInput, hasT, parsedLPT);
+          if (parseResult.errors.length > 0) {
+            errors.push(`Input Error: ${parseResult.errors.join(' ')}`);
+          } else {
+            renderTestCasesInPre(inputPre, parseResult, failedTestNum);
+            successes.push(`Input (${parseResult.tests.length} test cases)`);
+            if (parseResult.warnings.length > 0) {
+              warnings.push(`Input: ${parseResult.warnings.join(' ')}`);
+            }
+          }
+        }
       }
 
-      // Render each test case group
-      parseResult.tests.forEach((test) => {
-        const testSpan = document.createElement('span');
-        testSpan.className = 'cf-th-testcase';
-        testSpan.setAttribute('data-test-number', test.number);
-        testSpan.setAttribute('data-test-label', `#${test.number}`);
-
-        // Inline base styles for 100% compatibility
-        testSpan.style.display = 'block';
-        testSpan.style.position = 'relative';
-        testSpan.style.borderLeft = '4px solid transparent';
-        testSpan.style.paddingLeft = '6px';
-        testSpan.style.paddingRight = '60px';
-        testSpan.style.margin = '2px 0';
-        testSpan.style.borderRadius = '3px';
-        testSpan.style.transition = 'background-color 0.15s ease, border-left-color 0.15s ease';
-        testSpan.style.cursor = 'pointer';
-
-        const isFailed = failedTestNum !== null && test.number === failedTestNum;
-        if (isFailed) {
-          testSpan.classList.add('cf-th-failed');
-          testSpan.style.backgroundColor = '#ffe3e3';
-          testSpan.style.borderLeft = '4px solid #dc3545';
-        }
-
-        // JS Hover Event Handlers to guarantee visual highlight on mouse over
-        testSpan.addEventListener('mouseenter', () => {
-          testSpan.style.backgroundColor = isFailed ? '#ffc9c9' : '#bbe1ff';
-          testSpan.style.borderLeft = isFailed ? '4px solid #dc3545' : '4px solid #0056b3';
-          testSpan.style.boxShadow = '0 1px 4px rgba(0, 86, 179, 0.25)';
-        });
-
-        testSpan.addEventListener('mouseleave', () => {
-          if (isFailed) {
-            testSpan.style.backgroundColor = '#ffe3e3';
-            testSpan.style.borderLeft = '4px solid #dc3545';
-            testSpan.style.boxShadow = 'none';
+      // Process Output
+      if (outputPre) {
+        const origOutput = getRawPreText(outputPre);
+        if (!origOutput || origOutput.trim() === '' || origOutput.trim() === '?' || origOutput.trim() === '...') {
+          warnings.push("Output content is empty or loading.");
+        } else {
+          outputPre.textContent = origOutput;
+          const parseResult = parseAnswerTestCases(origOutput, parsedLPA);
+          if (parseResult.errors.length > 0) {
+            errors.push(`Output Error: ${parseResult.errors.join(' ')}`);
           } else {
-            testSpan.style.backgroundColor = 'transparent';
-            testSpan.style.borderLeft = '4px solid transparent';
-            testSpan.style.boxShadow = 'none';
+            renderTestCasesInPre(outputPre, parseResult, failedTestNum);
+            successes.push(`Output (${parseResult.tests.length} test cases)`);
+            if (parseResult.warnings.length > 0) {
+              warnings.push(`Output: ${parseResult.warnings.join(' ')}`);
+            }
           }
-        });
+        }
+      }
 
-        // Raw input lines text node (CSS ::before pseudo-element renders #1 badge)
-        const linesText = document.createTextNode(test.lines.join('\n') + '\n');
-        testSpan.appendChild(linesText);
+      // Process Answer
+      if (answerPre) {
+        const origAnswer = getRawPreText(answerPre);
+        if (!origAnswer || origAnswer.trim() === '' || origAnswer.trim() === '?' || origAnswer.trim() === '...') {
+          warnings.push("Answer content is empty or loading.");
+        } else {
+          answerPre.textContent = origAnswer;
+          const parseResult = parseAnswerTestCases(origAnswer, parsedLPA);
+          if (parseResult.errors.length > 0) {
+            errors.push(`Answer Error: ${parseResult.errors.join(' ')}`);
+          } else {
+            renderTestCasesInPre(answerPre, parseResult, failedTestNum);
+            successes.push(`Answer (${parseResult.tests.length} test cases)`);
+            if (parseResult.warnings.length > 0) {
+              warnings.push(`Answer: ${parseResult.warnings.join(' ')}`);
+            }
+          }
+        }
+      }
 
-        initialPre.appendChild(testSpan);
-      });
-
-      // Render remaining lines if incomplete block exists
-      if (parseResult.remainder.length > 0) {
-        const remainderSpan = document.createElement('span');
-        remainderSpan.className = 'cf-th-remainder';
-        remainderSpan.style.opacity = '0.7';
-        remainderSpan.style.fontStyle = 'italic';
-        remainderSpan.textContent = parseResult.remainder.join('\n') + '\n';
-        initialPre.appendChild(remainderSpan);
+      if (errors.length > 0) {
+        statusMsg.textContent = errors.join(' | ');
+        statusMsg.className = 'cf-th-status cf-th-visible cf-th-error';
+      } else if (warnings.length > 0) {
+        const succStr = successes.length > 0 ? `Highlighted ${successes.join(', ')}. ` : '';
+        statusMsg.textContent = `${succStr}${warnings.join(' ')}`;
+        statusMsg.className = 'cf-th-status cf-th-visible cf-th-warning';
+      } else if (successes.length > 0) {
+        statusMsg.textContent = `Successfully highlighted ${successes.join(', ')}!`;
+        statusMsg.className = 'cf-th-status cf-th-visible cf-th-info';
       }
     }
 
-    // Event Listeners
-    highlightBtn.addEventListener('click', performHighlight);
-    resetBtn.addEventListener('click', performReset);
+    if (highlightBtn) highlightBtn.onclick = performHighlight;
+    if (resetBtn) resetBtn.onclick = performReset;
 
-    // Enable Enter key on number input to trigger Highlight
-    numInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        performHighlight();
-      }
-    });
+    if (numInput) {
+      numInput.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          performHighlight();
+        }
+      };
+    }
+
+    if (numAnswerInput) {
+      numAnswerInput.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          performHighlight();
+        }
+      };
+    }
 
     // Auto-highlight on setup
     performHighlight();
   }
 
   /**
-   * Scan DOM for Codeforces Input PRE elements
+   * Scan DOM for Codeforces submission & sample PRE elements
    */
   function scanAndInitialize() {
     const preElements = document.querySelectorAll('pre');
+    if (preElements.length === 0) return;
+
+    const containerMap = new Map();
+
     preElements.forEach((pre) => {
-      if (isCodeforcesSubmissionInputPre(pre)) {
-        setupInputHighlighter(pre);
+      let type = null;
+      if (isCodeforcesInputPre(pre)) type = 'input';
+      else if (isCodeforcesOutputPre(pre)) type = 'output';
+      else if (isCodeforcesAnswerPre(pre)) type = 'answer';
+
+      if (type) {
+        const container = getTestDetailsContainer(pre);
+        if (!containerMap.has(container)) {
+          containerMap.set(container, { input: null, output: null, answer: null });
+        }
+        const group = containerMap.get(container);
+        if (!group[type]) {
+          group[type] = pre;
+        }
+      }
+    });
+
+    containerMap.forEach((group, container) => {
+      const { input, output, answer } = group;
+      const needsInit = (input && !input.hasAttribute('data-cf-th-initialized')) ||
+                        (output && !output.hasAttribute('data-cf-th-initialized')) ||
+                        (answer && !answer.hasAttribute('data-cf-th-initialized'));
+
+      if (needsInit) {
+        setupTestcaseHighlighterGroup(container, input, output, answer);
       }
     });
   }
