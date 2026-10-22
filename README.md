@@ -1,6 +1,18 @@
 # CF Testcase Highlighter
 
+[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-Install%20Extension-blue?style=for-the-badge&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/cf-testcase-highlighter/fgdihefikgdpnjijfmjibobockclepbo)
+[![Version](https://img.shields.io/badge/version-1.0.0-green?style=for-the-badge)](https://chromewebstore.google.com/detail/cf-testcase-highlighter/fgdihefikgdpnjijfmjibobockclepbo)
+[![License: MIT](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
+
 Quickly identify and highlight individual test cases in Codeforces submission inputs, outputs, and answers on hover.
+
+---
+
+## ⚡ 1-Click Install
+
+Install **CF Testcase Highlighter** directly from the official Chrome Web Store:
+
+👉 **[Add to Chrome (Chrome Web Store)](https://chromewebstore.google.com/detail/cf-testcase-highlighter/fgdihefikgdpnjijfmjibobockclepbo)**
 
 ---
 
@@ -28,29 +40,28 @@ When debugging competitive programming submissions on Codeforces, finding a spec
 
 ---
 
-## Installation
+## Installation Options
 
-### Method 1: Download ZIP (Recommended)
+### Option 1: Chrome Web Store (Recommended)
 
-1. Download the latest release ZIP from the repository:
-   - Click the green **Code** button at the top of this GitHub page and select **Download ZIP** (or download the ZIP from [Releases](https://github.com/AyushRaj-456/cf-testcase-highlighter/releases)).
-2. Extract the downloaded `cf-testcase-highlighter.zip` file to a folder on your computer.
-3. Open Google Chrome and type **`chrome://extensions/`** in the address bar.
-4. Enable **Developer mode** using the toggle switch in the top-right corner.
-5. Click **Load unpacked** in the top-left corner.
-6. Select the extracted folder containing `manifest.json`.
+1. Open the [CF Testcase Highlighter Chrome Web Store Page](https://chromewebstore.google.com/detail/cf-testcase-highlighter/fgdihefikgdpnjijfmjibobockclepbo).
+2. Click **Add to Chrome**.
+3. Confirm the prompt — the extension is now installed and active!
 
 ---
 
-### Method 2: Clone Repository via Git
+### Option 2: Manual Installation from Source (Developer Mode)
 
-```bash
-git clone https://github.com/AyushRaj-456/cf-testcase-highlighter.git
-```
+If you prefer to run or build from source:
 
-1. Open Google Chrome and go to `chrome://extensions/`.
-2. Enable **Developer mode** in the top-right corner.
-3. Click **Load unpacked** and select the cloned `cf-testcase-highlighter` folder.
+1. Download the latest release ZIP from [Releases](https://github.com/AyushRaj-456/cf-testcase-highlighter/releases) (or clone the repository):
+   ```bash
+   git clone https://github.com/AyushRaj-456/cf-testcase-highlighter.git
+   ```
+2. Open Google Chrome and navigate to `chrome://extensions/`.
+3. Enable **Developer mode** using the toggle switch in the top-right corner.
+4. Click **Load unpacked** in the top-left corner.
+5. Select the project directory containing `manifest.json`.
 
 ---
 
